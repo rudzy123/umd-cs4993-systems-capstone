@@ -1,0 +1,94 @@
+name: northstar
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: northstar
+      POSTGRES_PASSWORD: ${NORTHSTAR_DB_PASSWORD:-northstar}
+      POSTGRES_DB: northstar
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - northstar-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U northstar -d northstar"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      NORTHSTAR_DATABASE_URL: postgresql+psycopg://northstar:${NORTHSTAR_DB_PASSWORD:-northstar}@postgres:5432/northstar
+      NORTHSTAR_CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173,http://localhost:8080
+      NORTHSTAR_MIGRATIONS_DIR: /app/database/migrations
+      NORTHSTAR_LOG_LEVEL: INFO
+      NORTHSTAR_DATABASE_WAIT_SECONDS: "30"
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    init: true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready')"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+
+  worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    environment:
+      NORTHSTAR_DATABASE_URL: postgresql+psycopg://northstar:${NORTHSTAR_DB_PASSWORD:-northstar}@postgres:5432/northstar
+      NORTHSTAR_MIGRATIONS_DIR: /app/database/migrations
+      NORTHSTAR_LOG_LEVEL: INFO
+      NORTHSTAR_POLL_INTERVAL_SECONDS: "0.5"
+      NORTHSTAR_LEASE_SECONDS: "120"
+      NORTHSTAR_DATABASE_WAIT_SECONDS: "30"
+      NORTHSTAR_HEARTBEAT_PATH: /tmp/northstar-worker-heartbeat
+    depends_on:
+      postgres:
+        condition: service_healthy
+    init: true
+    stop_grace_period: 20s
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import pathlib,time; p=pathlib.Path('/tmp/northstar-worker-heartbeat'); raise SystemExit(0 if p.exists() and time.time()-p.stat().st_mtime<30 else 1)",
+        ]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    ports:
+      - "127.0.0.1:8080:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  northstar-pg:

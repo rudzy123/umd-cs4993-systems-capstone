@@ -1,0 +1,93 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: backend lint, types, and tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: northstar
+          POSTGRES_PASSWORD: northstar
+          POSTGRES_DB: northstar_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U northstar -d northstar_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install packages
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e "./backend[dev]" -e "./worker[dev]"
+      - name: Ruff
+        run: |
+          ruff check backend worker tests conftest.py scripts
+          ruff format --check backend worker tests conftest.py scripts
+      - name: Mypy
+        run: mypy
+      - name: Pytest
+        env:
+          NORTHSTAR_TEST_DATABASE_URL: postgresql+psycopg://northstar:northstar@127.0.0.1:5432/northstar_test
+        run: pytest
+
+  frontend:
+    name: frontend lint, tests, and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install, lint, test, and build
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run lint
+          npm test
+          npm run build
+
+  docker:
+    name: docker image builds
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build API image
+        run: docker build -f backend/Dockerfile -t northstar-api:ci .
+      - name: Build worker image
+        run: docker build -f worker/Dockerfile -t northstar-worker:ci .
+      - name: Build frontend image
+        run: docker build -f frontend/Dockerfile -t northstar-frontend:ci .
+
+  smoke:
+    name: compose smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start the stack
+        run: docker compose up --build -d --wait
+      - name: Submit one of each job
+        run: python3 scripts/smoke_test.py
+      - name: Shut down
+        if: always()
+        run: docker compose down -v

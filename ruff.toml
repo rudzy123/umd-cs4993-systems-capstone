@@ -1,0 +1,13 @@
+target-version = "py312"
+line-length = 100
+src = ["backend/src", "worker/src", "backend/tests", "worker/tests", "tests"]
+
+[lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[lint.isort]
+known-first-party = ["northstar", "northstar_worker"]
+
+[lint.per-file-ignores]
+"backend/src/northstar/api/routes.py" = ["B008"]

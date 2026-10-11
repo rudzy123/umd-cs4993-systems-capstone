@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "northstar-worker"
+version = "1.0.0"
+description = "Northstar Job Lab worker process"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "northstar>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
